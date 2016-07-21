@@ -1,0 +1,7 @@
+name = Unitpay
+description = Module for unitpay.ru
+core = 7.x
+package = Commerce
+dependencies[] = commerce
+dependencies[] = commerce_payment
+dependencies[] = commerce_order
