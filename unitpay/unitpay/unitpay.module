@@ -4,9 +4,17 @@ function unitpay_settings_form($settings = NULL) {
     $form = array();
 
     $settings = (array) $settings + array(
+            'domain'     => '',
             'public_key' => '',
             'secret_key' => '',
         );
+
+    $form['domain'] = array(
+        '#type' => 'textfield',
+        '#title' => t('DOMAIN'),
+        '#description' => t('Вставьте ваш рабочий домен UnitPay'),
+        '#default_value' =>  $settings['domain'],
+    );
 
     $form['public_key'] = array(
         '#type' => 'textfield',
@@ -49,6 +57,7 @@ function unitpay_redirect_form($form, &$form_state, $order, $payment_method) {
 
 function unitpay_build_redirect_form($form, &$form_state, $order, $settings) {
     // Choose a server to redirect.
+    $domain = unitpay_get_setting('domain');
     $public_key = unitpay_get_setting('public_key');
 
     $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
@@ -59,7 +68,7 @@ function unitpay_build_redirect_form($form, &$form_state, $order, $settings) {
     $account = $order->order_id;
     $desc = 'Оплата по заказу №' . $order->order_number;
 
-    $form['#action'] = 'https://unitpay.ru/pay/' . $public_key;
+    $form['#action'] = "https://$domain/pay/" . $public_key;
     $form['sum'] = array(
         '#type' => 'hidden',
         '#value' => $sum,
