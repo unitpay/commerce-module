@@ -1,5 +1,5 @@
 name = Unitpay
-description = Module for unitpay.ru
+description = Module for UnitPay
 core = 7.x
 package = Commerce
 dependencies[] = commerce
