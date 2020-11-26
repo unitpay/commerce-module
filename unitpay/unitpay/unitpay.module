@@ -1,13 +1,27 @@
 <?php
 
+/**
+ * Implements hook_menu().
+ */
+function unitpay_menu() {
+    $items['unitpay/callback'] = array(
+            'title' => 'Callback for unitpay request',
+            'page callback' => 'unitpay_callback',
+            'access callback' => TRUE,
+            'type' => MENU_CALLBACK,
+    );
+
+    return $items;
+}
+
 function unitpay_settings_form($settings = NULL) {
     $form = array();
 
     $settings = (array) $settings + array(
-            'domain'     => '',
-            'public_key' => '',
-            'secret_key' => '',
-        );
+        'domain'     => '',
+        'public_key' => '',
+        'secret_key' => '',
+    );
 
     $form['domain'] = array(
         '#type' => 'textfield',
@@ -58,15 +72,27 @@ function unitpay_redirect_form($form, &$form_state, $order, $payment_method) {
 function unitpay_build_redirect_form($form, &$form_state, $order, $settings) {
     // Choose a server to redirect.
     $domain = unitpay_get_setting('domain');
+    $secret_key = unitpay_get_setting('secret_key');
     $public_key = unitpay_get_setting('public_key');
 
     $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+    $currency = $order_wrapper->commerce_order_total->currency_code->value();
+
     $sum = $order_wrapper->commerce_order_total->amount->value();
     $sum = $sum/100;
     $sum = number_format($sum, 2, '.','');
 
+
     $account = $order->order_id;
     $desc = 'Оплата по заказу №' . $order->order_number;
+
+    $signature = hash('sha256', join('{up}', array(
+            $order->order_id,
+            $currency,
+            $desc,
+            $sum ,
+            $secret_key
+    )));
 
     $form['#action'] = "https://$domain/pay/" . $public_key;
     $form['sum'] = array(
@@ -81,6 +107,37 @@ function unitpay_build_redirect_form($form, &$form_state, $order, $settings) {
         '#type' => 'hidden',
         '#value' => $desc,
     );
+    $form['desc'] = array(
+        '#type' => 'hidden',
+        '#value' => $desc,
+    );
+    $form['currency'] = array(
+        '#type' => 'hidden',
+        '#value' => $currency,
+    );
+
+    $form['signature'] = array(
+        '#type' => 'hidden',
+        '#value' => $signature,
+    );
+
+    $has_email = $order->mail && (strlen($order->mail) > 0);
+
+
+    if ($has_email) {
+        $form['customerEmail'] = array(
+            '#type' => 'hidden',
+            '#value' => $order->mail,
+        );
+    }
+
+    if($has_email){
+        $form['cashItems'] = array(
+            '#type' => 'hidden',
+            '#value' => get_cash_items($order),
+        );
+    }
+
     $form['submit'] = array(
         '#type' => 'submit',
         '#value' => t('Pay via Unitpay'),
@@ -89,22 +146,47 @@ function unitpay_build_redirect_form($form, &$form_state, $order, $settings) {
     return $form;
 }
 
+function get_cash_items($order)
+{
+    if (!$order) return '';
 
-/**
- * Implements hook_menu().
- */
-function unitpay_menu() {
-    $items['unitpay/callback'] = array(
-        'title' => 'Callback for unitpay request',
-        'page callback' => 'unitpay_callback',
-        'access callback' => TRUE,
-        'type' => MENU_CALLBACK,
-    );
+    $orderProducts = array();
 
-    return $items;
+    foreach(entity_metadata_wrapper('commerce_order', $order)->commerce_line_items as $item) {
+        if (in_array($item->type->value(), commerce_product_line_item_types())) {
+            $priceData = $item->commerce_unit_price->value();
+
+            $orderProducts[] = array(
+                'name'     => $item->commerce_product->title->value(),
+                'count'    => number_format($item->quantity->value()),
+                'price'    => number_format($priceData["amount"]/100, 2, '.', ''),
+                'currency' => $priceData["currency_code"],
+                'type'     => 'commodity',
+                'nds'      => isset($priceData["data"]["include_tax"]) ? getTaxRates(preg_replace('/\D/', '', $priceData["data"]["include_tax"])) : 'none',
+            );
+        }
+    }
+
+    return base64_encode(json_encode($orderProducts));
 }
 
+function getTaxRates($rate){
+    switch (intval($rate)){
+        case 10:
+            $vat = 'vat10';
+            break;
+        case 20:
+            $vat = 'vat20';
+            break;
+        case 0:
+            $vat = 'vat0';
+            break;
+        default:
+            $vat = 'none';
+    }
 
+    return $vat;
+}
 
 /**
  * Page callback to receive payment notification from Unitpay.
@@ -180,7 +262,7 @@ function unitpay_check( $params )
 
     if (!$order){
         $result = array('error' =>
-            array('message' => 'заказа не существует')
+                array('message' => 'заказа не существует')
         );
     }else{
         $wrapper = entity_metadata_wrapper('commerce_order', $order);
@@ -212,10 +294,10 @@ function unitpay_payment( $params )
 {
 
     $order = commerce_order_load($params['account']);
-    
+
     if (!$order){
         $result = array('error' =>
-            array('message' => 'заказа не существует')
+                array('message' => 'заказа не существует')
         );
     }else{
         $wrapper = entity_metadata_wrapper('commerce_order', $order);
@@ -236,13 +318,14 @@ function unitpay_payment( $params )
         else{
 
             commerce_order_status_update($order, 'checkout_complete');
-
+            commerce_order_status_update($order, 'completed_completed');
+            commerce_order_status_update($order, 'completed');
             $result = array('result' =>
                 array('message' => 'Запрос успешно обработан')
             );
         }
     }
-    
+
     return $result;
 }
 
